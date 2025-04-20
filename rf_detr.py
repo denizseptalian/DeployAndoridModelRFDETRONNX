@@ -3,10 +3,8 @@ import cv2
 import numpy as np
 from PIL import Image
 from collections import Counter
-import base64
-from io import BytesIO
 import os
-import requests
+import gdown
 import onnxruntime as ort
 from supervision import BoxAnnotator, LabelAnnotator, Color, Detections
 
@@ -17,10 +15,8 @@ st.set_page_config(page_title="Deteksi Buah Sawit", layout="centered")
 def download_model_from_drive(file_id, destination):
     if not os.path.exists(destination):
         st.info("Mengunduh model dari Google Drive...")
-        url = f"https://drive.google.com/uc?export=download&id={file_id}"
-        response = requests.get(url)
-        with open(destination, "wb") as f:
-            f.write(response.content)
+        url = f"https://drive.google.com/uc?id={file_id}"
+        gdown.download(url, destination, quiet=False)
         st.success("Model berhasil diunduh.")
     else:
         st.info("Model sudah tersedia secara lokal.")
@@ -28,7 +24,7 @@ def download_model_from_drive(file_id, destination):
 # --- Load model ONNX ---
 @st.cache_resource
 def load_model():
-    file_id = "1GNBuvCB_UvoFiFjVBqT2Hpabu1zfOJtU"  # Ganti dengan file ID model ONNX kamu
+    file_id = "1GNBuvCB_UvoFiFjVBqT2Hpabu1zfOJtU"  # Ganti dengan ID Google Drive model kamu
     model_path = "inference_model.onnx"
     download_model_from_drive(file_id, model_path)
     session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
@@ -44,7 +40,7 @@ def predict_image(session, image):
     inputs = {session.get_inputs()[0].name: img_input}
     outputs = session.run(None, inputs)
 
-    return outputs
+    return outputs  # akan diproses di draw_results
 
 # Warna bounding box sesuai label
 label_to_color = {
@@ -88,23 +84,21 @@ def draw_results(image, outputs):
 
     return img, class_counts
 
-# --- Streamlit UI ---
-st.title("📸 Deteksi Buah Sawit Menggunakan RF-DETR")
+# --- UI Streamlit ---
+st.title("🍊 Deteksi Buah Sawit Menggunakan RF-DETR")
 
-uploaded_file = st.file_uploader("Unggah gambar buah sawit", type=["jpg", "jpeg", "png"])
+session = load_model()
 
-if uploaded_file is not None:
-    image = Image.open(uploaded_file)
-    st.image(image, caption="Gambar Diupload", use_column_width=True)
+uploaded_image = st.file_uploader("Unggah gambar buah sawit", type=["jpg", "jpeg", "png"])
+if uploaded_image:
+    image = Image.open(uploaded_image)
+    st.image(image, caption="Gambar yang diunggah", use_column_width=True)
 
-    session = load_model()
-
-    with st.spinner("Melakukan deteksi..."):
+    with st.spinner("Mendeteksi..."):
         outputs = predict_image(session, image)
-        result_img, counts = draw_results(image, outputs)
+        img_result, counts = draw_results(image, outputs)
 
-    st.image(result_img, caption="Hasil Deteksi", use_column_width=True)
-
-    st.subheader("Jumlah Deteksi:")
+    st.image(img_result, caption="Hasil Deteksi", use_column_width=True)
+    st.markdown("### Jumlah Deteksi per Kelas:")
     for label, count in counts.items():
-        st.write(f"- **{label}**: {count} buah")
+        st.write(f"- **{label}**: {count}")
