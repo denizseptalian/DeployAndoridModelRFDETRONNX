@@ -5,16 +5,33 @@ from PIL import Image
 from collections import Counter
 import base64
 from io import BytesIO
+import os
+import requests
 import onnxruntime as ort
 from supervision import BoxAnnotator, LabelAnnotator, Color, Detections
 
 # Konfigurasi halaman
 st.set_page_config(page_title="Deteksi Buah Sawit", layout="centered")
 
-# Load model ONNX
+# --- Fungsi untuk download model dari Google Drive ---
+def download_model_from_drive(file_id, destination):
+    if not os.path.exists(destination):
+        st.info("Mengunduh model dari Google Drive...")
+        url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        response = requests.get(url)
+        with open(destination, "wb") as f:
+            f.write(response.content)
+        st.success("Model berhasil diunduh.")
+    else:
+        st.info("Model sudah tersedia secara lokal.")
+
+# --- Load model ONNX ---
 @st.cache_resource
 def load_model():
-    session = ort.InferenceSession("inference_model.onnx", providers=["CPUExecutionProvider"])
+    file_id = "1GNBuvCB_UvoFiFjVBqT2Hpabu1zfOJtU"  # Ganti dengan file ID model ONNX kamu
+    model_path = "inference_model.onnx"
+    download_model_from_drive(file_id, model_path)
+    session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
     return session
 
 # Fungsi prediksi ONNX
@@ -27,7 +44,7 @@ def predict_image(session, image):
     inputs = {session.get_inputs()[0].name: img_input}
     outputs = session.run(None, inputs)
 
-    return outputs  # akan diproses di draw_results
+    return outputs
 
 # Warna bounding box sesuai label
 label_to_color = {
@@ -38,14 +55,12 @@ label_to_color = {
 
 label_annotator = LabelAnnotator()
 
-# Fungsi untuk parsing output ONNX RF-DETR (disesuaikan dengan output spesifik model)
+# Fungsi untuk parsing output ONNX RF-DETR
 def draw_results(image, outputs):
     img = np.array(image.convert("RGB"))
     class_counts = Counter()
 
-    # Output parsing tergantung struktur model ONNX kamu
-    boxes, scores, class_ids = outputs  # contoh umum: [N, 4], [N], [N]
-
+    boxes, scores, class_ids = outputs
     boxes = np.array(boxes)
     scores = np.array(scores)
     class_ids = np.array(class_ids).astype(int)
@@ -72,3 +87,24 @@ def draw_results(image, outputs):
         img = label_annotator.annotate(scene=img, detections=detection, labels=[label])
 
     return img, class_counts
+
+# --- Streamlit UI ---
+st.title("📸 Deteksi Buah Sawit Menggunakan RF-DETR")
+
+uploaded_file = st.file_uploader("Unggah gambar buah sawit", type=["jpg", "jpeg", "png"])
+
+if uploaded_file is not None:
+    image = Image.open(uploaded_file)
+    st.image(image, caption="Gambar Diupload", use_column_width=True)
+
+    session = load_model()
+
+    with st.spinner("Melakukan deteksi..."):
+        outputs = predict_image(session, image)
+        result_img, counts = draw_results(image, outputs)
+
+    st.image(result_img, caption="Hasil Deteksi", use_column_width=True)
+
+    st.subheader("Jumlah Deteksi:")
+    for label, count in counts.items():
+        st.write(f"- **{label}**: {count} buah")
